@@ -2,7 +2,7 @@
   "name": "dsh-vscode",
   "displayName": "DeepSeek Harness (DSH) Agent",
   "description": "原生 VS Code 智能体：侧边栏聊天驱动 DSH 运行时，文件修改实时反映到编辑器，命令执行可见于集成终端，权限请求用原生对话框。",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "publisher": "local",
   "private": true,
   "license": "MIT",
@@ -18,6 +18,8 @@
     "onCommand:dsh.openChat",
     "onCommand:dsh.setApiKey",
     "onCommand:dsh.fullPipeline",
+    "onCommand:dsh.setWorkspace",
+    "onCommand:dsh.openWorkspace",
     "onCommand:dsh.openPanel",
     "onCommand:dsh.quickTask",
     "onCommand:dsh.stop",
@@ -59,6 +61,16 @@
         "category": "DSH"
       },
       {
+        "command": "dsh.setWorkspace",
+        "title": "DSH: 设置工程位置…",
+        "category": "DSH"
+      },
+      {
+        "command": "dsh.openWorkspace",
+        "title": "DSH: 打开工程位置",
+        "category": "DSH"
+      },
+      {
         "command": "dsh.openPanel",
         "title": "DSH: 打开 Web 面板（旧版）",
         "category": "DSH"
@@ -96,6 +108,11 @@
           "type": "string",
           "default": "",
           "description": "DSH_HOME 数据目录。留空 = 插件私有目录（推荐）；如需复用桌面版配置可填其 dsh-home 路径（使用前先关闭桌面版）。"
+        },
+        "dsh.workspaceRoot": {
+          "type": "string",
+          "default": "",
+          "description": "工程存储位置（智能体工作目录）。留空 = 使用 VS Code 当前打开的文件夹；也可用命令「DSH: 设置工程位置…」选择。"
         },
         "dsh.port": {
           "type": "number",

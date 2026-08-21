@@ -27,6 +27,8 @@ header .title { font-weight:600; font-size:12px; }
 #statusDot { width:8px; height:8px; border-radius:50%; background:var(--run); flex:none; }
 #statusDot.ok { background:var(--ok); } #statusDot.bad { background:var(--bad); }
 #model { color:var(--muted); font-size:11px; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+#workspace { color:var(--muted); font-size:11px; max-width:40%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; cursor:pointer; flex:none; }
+#workspace:hover { color:var(--fg); }
 button { background:var(--accent); color:var(--accent-fg); border:0; border-radius:4px; padding:4px 10px; cursor:pointer; font-size:12px; }
 button.ghost { background:transparent; border:1px solid var(--border); color:var(--fg); }
 button:disabled { opacity:.5; cursor:default; }
@@ -93,6 +95,7 @@ function html() {
     <div id="statusDot"></div>
     <span class="title">DSH Agent</span>
     <span id="model">未启动</span>
+    <span id="workspace" title="工程位置（点击打开）"></span>
     <button id="stopBtn" class="ghost" disabled title="停止当前回合">停止</button>
   </header>
   <div id="progress" class="hidden">
@@ -117,9 +120,11 @@ function html() {
   const vscode = acquireVsCodeApi();
   const $ = (id) => document.getElementById(id);
   const messages = $("messages"), input = $("input"), sendBtn = $("sendBtn"), stopBtn = $("stopBtn");
-  const statusDot = $("statusDot"), model = $("model");
+  const statusDot = $("statusDot"), model = $("model"), workspaceEl = $("workspace");
   let busy = false;
   const artifactSeen = new Set();
+
+  workspaceEl.onclick = () => vscode.postMessage({ type: "openWorkspace" });
 
   function setStatus(state, label) {
     statusDot.className = state; // ok | bad | ''
@@ -239,6 +244,7 @@ function html() {
     switch (m.type) {
       case "init": setStatus(m.state || "", m.model || ""); break;
       case "status": setStatus(m.state, m.label || m.model); break;
+      case "workspace": workspaceEl.textContent = m.path || ""; workspaceEl.title = "工程位置：" + (m.path || "") + "（点击打开）"; break;
       case "assistantDelta": addAssistant(m.text, true); break;
       case "assistantDone": setBusy(false); setStatus("ok", m.model || model.textContent); break;
       case "toolCall": addToolCard(m.tool); break;

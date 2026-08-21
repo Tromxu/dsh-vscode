@@ -33,9 +33,54 @@ let sessionClient = null;
 let bridge = null;
 let currentSessionId = null;
 
+/**
+ * 工程位置（智能体工作区）：
+ * 优先 dsh.workspaceRoot 设置（工程存储位置）→ VS Code 当前打开的第一个文件夹 → 用户主目录。
+ */
 function getWorkspace() {
+  const cfg = vscode.workspace.getConfiguration("dsh");
+  const configured = String(cfg.get("workspaceRoot") || "").trim();
+  if (configured) return configured;
   const folders = vscode.workspace.workspaceFolders;
   return folders && folders.length > 0 ? folders[0].uri.fsPath : os.homedir();
+}
+
+/** 设置工程位置（保存为全局设置并重启运行时，下次会话在新目录工作）。 */
+async function setWorkspace(context) {
+  const picked = await vscode.window.showOpenDialog({
+    canSelectFolders: true,
+    canSelectFiles: false,
+    canSelectMany: false,
+    openLabel: "选择工程存储位置",
+    title: "DSH: 设置工程位置（智能体将在此目录工作）",
+  });
+  if (!picked || !picked[0]) return;
+  const dir = picked[0].fsPath;
+  await vscode.workspace
+    .getConfiguration("dsh")
+    .update("workspaceRoot", dir, vscode.ConfigurationTarget.Global);
+  // 工作区变了：重启运行时并新建会话，确保下次会话以新目录为 cwd
+  currentSessionId = null;
+  await stopRuntime();
+  vscode.window.showInformationMessage(
+    "工程位置已设置为：" + dir + "\n运行时已重启，发送消息后将在该目录工作。"
+  );
+  if (chatProvider) chatProvider.post({ type: "workspace", path: dir });
+}
+
+/** 打开工程位置（在资源管理器中定位；未设置则打开当前工作区文件夹）。 */
+async function openWorkspace() {
+  const ws = getWorkspace();
+  try {
+    const uri = vscode.Uri.file(ws);
+    await vscode.commands.executeCommand("revealInExplorer", uri);
+  } catch (e) {
+    try {
+      await vscode.env.openExternal(vscode.Uri.file(ws));
+    } catch {
+      output.appendLine("[openWorkspace] " + e.message);
+    }
+  }
 }
 
 function resolveFor(context) {
@@ -133,8 +178,14 @@ function postStatus(state, label) {
   if (chatProvider) chatProvider.post({ type: "status", state, label });
 }
 
+/** 推送工程位置到侧边栏头部（点击可在资源管理器打开）。 */
+function postWorkspace() {
+  if (chatProvider) chatProvider.post({ type: "workspace", path: getWorkspace() });
+}
+
 /** 视图打开时自动启动运行时并连接，避免停留在「未连接」。 */
 async function onViewOpen(context) {
+  postWorkspace();
   if (sessionClient) {
     postStatus("ok", "已连接 · " + (runtime ? runtime.url : ""));
     return;
@@ -268,6 +319,9 @@ function activate(context) {
       case "openArtifact":
         await openArtifact(m.path);
         break;
+      case "openWorkspace":
+        await openWorkspace();
+        break;
     }
   };
   context.subscriptions.push(
@@ -282,6 +336,8 @@ function activate(context) {
     }),
     vscode.commands.registerCommand("dsh.setApiKey", () => setApiKey(context)),
     vscode.commands.registerCommand("dsh.fullPipeline", () => fullPipeline(context)),
+    vscode.commands.registerCommand("dsh.setWorkspace", () => setWorkspace(context)),
+    vscode.commands.registerCommand("dsh.openWorkspace", () => openWorkspace()),
     vscode.commands.registerCommand("dsh.openPanel", () => openPanel(context)),
     vscode.commands.registerCommand("dsh.quickTask", () => quickTask(context)),
     vscode.commands.registerCommand("dsh.stop", () => stopRuntime()),
