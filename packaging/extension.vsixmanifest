@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011" xmlns:d="http://schemas.microsoft.com/developer/vsx-schema-design/2011">
   <Metadata>
-    <Identity Language="zh-CN" Id="dsh-vscode" Version="0.3.0" Publisher="local" />
+    <Identity Language="zh-CN" Id="dsh-vscode" Version="0.3.1" Publisher="local" />
     <DisplayName>DeepSeek Harness (DSH) Agent Panel</DisplayName>
     <Description>原生 VS Code 智能体：进度面板（TODO/当前动作/打包预览）+ 全流程开发团队（产品设计→开发→测试→封装发布），驱动 DeepSeek Harness 运行时。</Description>
     <Tags>deepseek,agent,ai,coding,harness,pipeline</Tags>

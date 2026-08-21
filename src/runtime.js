@@ -15,7 +15,8 @@ const path = require("node:path");
 
 /**
  * 自动探测 DeepSeek Harness 安装目录。
- * 优先级：环境变量 DSH_HARNESS → 各平台标准安装位置 → 返回 ""（交由用户设置）。
+ * 优先级：环境变量 DSH_HARNESS → 各平台标准安装位置。
+ * 只有验证过（存在 dsh 运行时 bin.js）的候选才会被接受；一个都没有则返回 ""。
  */
 function detectHarnessRoot() {
   const candidates = [];
@@ -33,10 +34,15 @@ function detectHarnessRoot() {
   }
   for (const c of candidates) {
     if (!c) continue;
-    const bin = path.join(c, "resources", "dsh", "vendor", "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js");
-    if (fs.existsSync(bin)) return c;
+    if (isHarnessRoot(c)) return c;
   }
-  return candidates.find(Boolean) || "";
+  return "";
+}
+
+/** 校验某目录是否包含 dsh 运行时（bin.js 存在即视为安装根）。 */
+function isHarnessRoot(c) {
+  const bin = path.join(c, "resources", "dsh", "vendor", "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js");
+  return fs.existsSync(bin);
 }
 
 /** 校验并解析运行时要用的路径。 */
@@ -44,23 +50,26 @@ function resolveRuntime(cfg, isolatedHome, workspace) {
   const harnessRoot = cfg.harnessRoot || detectHarnessRoot();
   if (!harnessRoot) {
     throw new Error(
-      "未找到 DeepSeek Harness 安装目录。\n请在 VS Code 设置（dsh.harnessRoot）中填写，或设置环境变量 DSH_HARNESS。"
+      "未找到 DeepSeek Harness 安装目录（已检查 DSH_HARNESS 与各平台标准安装位置）。\n" +
+      "请在 VS Code 设置（dsh.harnessRoot）中填写安装目录，或设置环境变量 DSH_HARNESS。"
     );
   }
-  const node = cfg.nodePath || path.join(harnessRoot, "resources", "node", "node.exe");
+  // node：优先用捆绑的 node.exe；缺失时回退系统 node（PATH 解析，由 spawn 负责）
+  const bundledNode = path.join(harnessRoot, "resources", "node", "node.exe");
+  const node = cfg.nodePath || (fs.existsSync(bundledNode) ? bundledNode : "node");
   const bin = path.join(
     harnessRoot,
     "resources", "dsh", "vendor", "node_modules",
     "@deepseek-ai", "dsh", "lib", "bin.js"
   );
   const missing = [];
-  if (!fs.existsSync(node)) missing.push(node);
   if (!fs.existsSync(bin)) missing.push(bin);
+  if (node !== "node" && !fs.existsSync(node)) missing.push(node);
   if (missing.length > 0) {
     throw new Error(
-      "找不到 DSH 运行时文件：\n" +
+      "DSH 运行时文件缺失（安装目录可能不完整或已更新布局）：\n" +
       missing.join("\n") +
-      "\n\n请在 VS Code 设置（dsh.harnessRoot）中填写 DeepSeek Harness 安装目录。"
+      "\n\n请确认 dsh.harnessRoot（或 DSH_HARNESS）指向完整的 DeepSeek Harness 安装目录。"
     );
   }
   const dshHome = cfg.dshHome || isolatedHome;

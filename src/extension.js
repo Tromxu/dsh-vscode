@@ -51,11 +51,28 @@ async function ensureRuntime(context) {
   try {
     resolved = resolveFor(context);
   } catch (e) {
+    const msg = e.message || String(e);
+    const isMissingInstall = msg.includes("未找到 DeepSeek Harness 安装目录") || msg.includes("DSH 运行时文件缺失");
     vscode.window
-      .showErrorMessage(e.message, "打开设置")
-      .then((choice) => {
+      .showErrorMessage(msg, ...(isMissingInstall ? ["打开设置", "选择安装目录…"] : ["打开设置"]))
+      .then(async (choice) => {
         if (choice === "打开设置") {
           vscode.commands.executeCommand("workbench.action.openSettings", "dsh.harnessRoot");
+        } else if (choice === "选择安装目录…") {
+          const picked = await vscode.window.showOpenDialog({
+            canSelectFolders: true,
+            canSelectFiles: false,
+            canSelectMany: false,
+            openLabel: "选择 DeepSeek Harness 安装目录",
+          });
+          if (picked && picked[0]) {
+            await vscode.workspace
+              .getConfiguration("dsh")
+              .update("harnessRoot", picked[0].fsPath, vscode.ConfigurationTarget.Global);
+            vscode.window.showInformationMessage(
+              "已保存 dsh.harnessRoot = " + picked[0].fsPath + "，请重新打开 DSH 面板或再发一条消息重试。"
+            );
+          }
         }
       });
     throw e;
