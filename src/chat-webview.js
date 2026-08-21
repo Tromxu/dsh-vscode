@@ -1,13 +1,15 @@
 "use strict";
 /**
- * chat-webview.js — 侧边栏智能体会话 UI（Cline 风格）。
+ * chat-webview.js — 侧边栏智能体会话 UI（软件交付工作台）。
  *
  * 内部消息协议（webview <-> 扩展宿主，经 postMessage）：
  *   宿主 -> webview: init | status | assistantDelta | assistantDone |
- *                    toolCall | toolResult | question | approval | error | history
- *   webview -> 宿主: send | stop | respond | approve | deny
+ *                    toolCall | toolResult | question | approval | error |
+ *                    todos | currentAction | artifact | stage
+ *   webview -> 宿主: send | stop | respond | openArtifact
  *
- * 注意：这里只做 UI 与消息协议，DSH 会话事件如何映射到这些消息由 bridge.js 负责。
+ * 进度面板：todo/write 事件 → 进度条 + 任务列表；tool/call → 当前动作；
+ *           构建产物（.vsix/.exe/...）→ 可点击打开（打包预览）。
  */
 const vscode = require("vscode");
 
@@ -15,14 +17,15 @@ const CSS = `
 :root { --bg: var(--vscode-sideBar-background); --fg: var(--vscode-sideBar-foreground);
   --border: var(--vscode-panel-border, #333); --accent: var(--vscode-button-background, #1f6feb);
   --accent-fg: var(--vscode-button-foreground, #fff); --muted: var(--vscode-descriptionForeground, #999);
-  --card: var(--vscode-editorWidget-background, #1c2128); --user: #0b3a5c; }
+  --card: var(--vscode-editorWidget-background, #1c2128); --user: #0b3a5c;
+  --ok: #3fb950; --run: #e3b341; --bad: #f85149; }
 * { box-sizing: border-box; }
 html,body { margin:0; height:100%; background:var(--bg); color:var(--fg); font-family:var(--vscode-font-family); font-size:13px; }
 #root { display:flex; flex-direction:column; height:100%; }
 header { display:flex; align-items:center; gap:8px; padding:8px 10px; border-bottom:1px solid var(--border); flex:none; }
 header .title { font-weight:600; font-size:12px; }
-#statusDot { width:8px; height:8px; border-radius:50%; background:#e3b341; flex:none; }
-#statusDot.ok { background:#3fb950; } #statusDot.bad { background:#f85149; }
+#statusDot { width:8px; height:8px; border-radius:50%; background:var(--run); flex:none; }
+#statusDot.ok { background:var(--ok); } #statusDot.bad { background:var(--bad); }
 #model { color:var(--muted); font-size:11px; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 button { background:var(--accent); color:var(--accent-fg); border:0; border-radius:4px; padding:4px 10px; cursor:pointer; font-size:12px; }
 button.ghost { background:transparent; border:1px solid var(--border); color:var(--fg); }
@@ -47,6 +50,32 @@ textarea { flex:1; resize:none; background:var(--card); color:var(--fg); border:
 #empty { color:var(--muted); text-align:center; padding:30px 16px; font-size:12px; line-height:1.8; }
 .hidden { display:none !important; }
 kbd { background:var(--card); border:1px solid var(--border); border-radius:3px; padding:0 4px; font-size:11px; }
+
+/* ---- 进度面板 ---- */
+#progress { flex:none; border-bottom:1px solid var(--border); padding:8px 10px; display:flex; flex-direction:column; gap:6px; background:var(--card); }
+#progress .p-row { display:flex; align-items:center; gap:8px; }
+#progress .p-label { font-size:11px; color:var(--muted); flex:none; }
+#progress .p-bar { flex:1; height:6px; border-radius:3px; background:var(--border); overflow:hidden; }
+#progress .p-fill { height:100%; width:0; background:var(--accent); transition:width .25s ease; }
+#progress .p-count { font-size:11px; color:var(--muted); flex:none; }
+#progress .p-section { font-size:10px; color:var(--muted); letter-spacing:.5px; text-transform:uppercase; margin-top:4px; }
+#todoList { display:flex; flex-direction:column; gap:2px; max-height:140px; overflow-y:auto; }
+.todo { display:flex; align-items:center; gap:6px; font-size:12px; padding:2px 4px; border-radius:4px; }
+.todo .ic { flex:none; width:14px; text-align:center; }
+.todo .ic.pending { color:var(--muted); }
+.todo .ic.running { color:var(--run); }
+.todo .ic.done { color:var(--ok); }
+.todo .txt { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.todo.running { background:rgba(227,179,65,.08); }
+#actionRow { display:flex; align-items:center; gap:6px; font-size:12px; padding:2px 4px; }
+#actionRow .spinner { flex:none; width:10px; height:10px; border-radius:50%; border:2px solid var(--border); border-top-color:var(--run); animation:spin .8s linear infinite; }
+@keyframes spin { to { transform:rotate(360deg); } }
+#actionRow .act-path { color:var(--muted); font-family:var(--vscode-editor-font-family); font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+#artifactList { display:flex; flex-direction:column; gap:4px; }
+.artifact { display:flex; align-items:center; gap:6px; border:1px solid var(--ok); border-radius:6px; padding:4px 8px; font-size:12px; }
+.artifact .ic { flex:none; }
+.artifact .a-path { flex:1; font-family:var(--vscode-editor-font-family); font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--fg); }
+.artifact button { flex:none; padding:2px 8px; font-size:11px; }
 `;
 
 function escapeHtml(s) {
@@ -66,6 +95,18 @@ function html() {
     <span id="model">未启动</span>
     <button id="stopBtn" class="ghost" disabled title="停止当前回合">停止</button>
   </header>
+  <div id="progress" class="hidden">
+    <div class="p-row">
+      <span class="p-label">进度</span>
+      <div class="p-bar"><div class="p-fill" id="pFill"></div></div>
+      <span class="p-count" id="pCount"></span>
+    </div>
+    <div id="todoList"></div>
+    <div class="p-section" id="actionTitle" class="hidden">当前动作</div>
+    <div id="actionRow" class="hidden"><div class="spinner"></div><span id="actionText">…</span><span class="act-path" id="actionPath"></span></div>
+    <div class="p-section" id="artifactTitle" class="hidden">打包产物</div>
+    <div id="artifactList"></div>
+  </div>
   <div id="messages"><div id="empty">在下方输入任务，DSH 智能体会在你的工作区里<br/>读代码 → 改文件 → 跑测试 → 修 bug，全程可见。<br/><br/>提示：<kbd>Enter</kbd> 发送，<kbd>Shift+Enter</kbd> 换行。</div></div>
   <div id="composer">
     <textarea id="input" placeholder="例如：修复 src 里的 bug 并运行测试直到通过" rows="1"></textarea>
@@ -78,6 +119,7 @@ function html() {
   const messages = $("messages"), input = $("input"), sendBtn = $("sendBtn"), stopBtn = $("stopBtn");
   const statusDot = $("statusDot"), model = $("model");
   let busy = false;
+  const artifactSeen = new Set();
 
   function setStatus(state, label) {
     statusDot.className = state; // ok | bad | ''
@@ -147,6 +189,51 @@ function html() {
     busy = b; sendBtn.disabled = b; stopBtn.disabled = !b;
   }
 
+  // ---- 进度面板 ----
+  function renderTodos(todos) {
+    const list = $("todoList");
+    list.innerHTML = "";
+    if (!todos || !todos.length) { $("progress").classList.add("hidden"); return; }
+    $("progress").classList.remove("hidden");
+    const done = todos.filter((t) => t.status === "completed").length;
+    $("pFill").style.width = Math.round((done / todos.length) * 100) + "%";
+    $("pCount").textContent = done + "/" + todos.length;
+    todos.forEach((t) => {
+      const row = document.createElement("div");
+      row.className = "todo" + (t.status === "in_progress" ? " running" : "");
+      const ic = document.createElement("span"); ic.className = "ic " +
+        (t.status === "completed" ? "done" : t.status === "in_progress" ? "running" : "pending");
+      ic.textContent = t.status === "completed" ? "✓" : t.status === "in_progress" ? "▶" : "○";
+      const txt = document.createElement("span"); txt.className = "txt";
+      txt.textContent = t.content; txt.title = t.content;
+      row.appendChild(ic); row.appendChild(txt);
+      list.appendChild(row);
+    });
+  }
+  function setCurrentAction(tool) {
+    $("actionTitle").classList.remove("hidden");
+    $("actionRow").classList.remove("hidden");
+    $("actionText").textContent = (tool && tool.name) || "…";
+    $("actionPath").textContent = (tool && tool.path) || "";
+    $("actionRow").title = (tool && tool.path) || "";
+  }
+  function addArtifact(a) {
+    if (artifactSeen.has(a.path)) return;
+    artifactSeen.add(a.path);
+    $("progress").classList.remove("hidden");
+    $("artifactTitle").classList.remove("hidden");
+    const row = document.createElement("div");
+    row.className = "artifact";
+    const ic = document.createElement("span"); ic.className = "ic"; ic.textContent = "📦";
+    const p = document.createElement("span"); p.className = "a-path";
+    p.textContent = (a.label ? a.label + " · " : "") + a.path; p.title = a.path;
+    const btn = document.createElement("button");
+    btn.textContent = "打开";
+    btn.onclick = () => vscode.postMessage({ type: "openArtifact", path: a.path });
+    row.appendChild(ic); row.appendChild(p); row.appendChild(btn);
+    $("artifactList").appendChild(row);
+  }
+
   window.addEventListener("message", (e) => {
     const m = e.data;
     switch (m.type) {
@@ -163,6 +250,9 @@ function html() {
         }
         break;
       }
+      case "todos": renderTodos(m.todos); break;
+      case "currentAction": setCurrentAction(m.tool); break;
+      case "artifact": addArtifact(m.artifact); break;
       case "question": setBusy(true); addQuestionCard(m.question); break;
       case "error": setStatus("bad", "错误"); addAssistant("⚠ " + (m.message || "未知错误"), false); setBusy(false); break;
     }

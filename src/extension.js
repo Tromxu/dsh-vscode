@@ -180,6 +180,56 @@ async function setApiKey(context) {
   }
 }
 
+/** 全流程开发：产品设计 → 软件开发 → 软件测试 → 封装发布（四阶段团队流水线）。 */
+async function fullPipeline(context) {
+  const idea = await vscode.window.showInputBox({
+    prompt: "你的软件想法（一句话），DSH 将按「设计→开发→测试→封装发布」四阶段全流程执行",
+    placeHolder: "例如：一个带历史记录和搜索的桌面便签应用",
+    ignoreFocusOut: true,
+  });
+  if (!idea || !idea.trim()) return;
+  const prompt =
+    "请以「软件开发全流程团队」的方式，在当前工作区完成这个项目：\n" +
+    idea.trim() + "\n\n" +
+    "按以下 4 个阶段依次推进；全程用 todo 工具维护任务清单与进度（每完成一项更新状态），每个阶段结束用一句话汇报：\n" +
+    "阶段 1 · 产品设计：撰写需求说明（PRD）与架构/技术选型文档，落到 docs/ 目录（无 docs 则创建）；\n" +
+    "阶段 2 · 软件开发：按设计实现全部代码，保持可运行；\n" +
+    "阶段 3 · 软件测试：编写并运行测试（单元/集成），修复缺陷直到全部通过；\n" +
+    "阶段 4 · 封装发布：完成构建与打包（如 npm run build / package），生成可交付的安装包或产物，最后告知产物路径。";
+  try {
+    await ensureSession(context);
+    postStatus("ok", "已连接 · " + (runtime ? runtime.url : ""));
+    if (!currentSessionId) {
+      const created = await sessionClient.sessionCreate({});
+      currentSessionId = created.sessionId;
+      output.appendLine("[session] created: " + currentSessionId);
+    }
+    await sessionClient.sessionPrompt({
+      sessionId: currentSessionId,
+      mode: "queue",
+      content: [{ type: "text", text: prompt }],
+    });
+    vscode.window.showInformationMessage("全流程开发已启动：产品设计 → 开发 → 测试 → 封装发布（进度见侧边栏面板）。");
+  } catch (e) {
+    vscode.window.showErrorMessage("全流程启动失败: " + e.message);
+  }
+}
+
+/** 打开打包产物（打包预览）。 */
+async function openArtifact(rawPath) {
+  try {
+    const uri = path.isAbsolute(rawPath)
+      ? vscode.Uri.file(rawPath)
+      : (() => {
+          const f = vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders[0];
+          return f ? vscode.Uri.joinPath(f.uri, rawPath) : vscode.Uri.file(rawPath);
+        })();
+    await vscode.commands.executeCommand("revealInExplorer", uri);
+  } catch (e) {
+    output.appendLine("[openArtifact] " + e.message);
+  }
+}
+
 function activate(context) {
   output = vscode.window.createOutputChannel("DSH Agent");
   context.subscriptions.push(output);
@@ -198,6 +248,9 @@ function activate(context) {
       case "respond":
         // 提问/审批由 bridge 用原生对话框处理，webview 不再直接应答
         break;
+      case "openArtifact":
+        await openArtifact(m.path);
+        break;
     }
   };
   context.subscriptions.push(
@@ -211,6 +264,7 @@ function activate(context) {
       vscode.commands.executeCommand("workbench.view.extension.dsh");
     }),
     vscode.commands.registerCommand("dsh.setApiKey", () => setApiKey(context)),
+    vscode.commands.registerCommand("dsh.fullPipeline", () => fullPipeline(context)),
     vscode.commands.registerCommand("dsh.openPanel", () => openPanel(context)),
     vscode.commands.registerCommand("dsh.quickTask", () => quickTask(context)),
     vscode.commands.registerCommand("dsh.stop", () => stopRuntime()),

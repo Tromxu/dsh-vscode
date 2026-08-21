@@ -173,6 +173,63 @@ const tick = () => new Promise((r) => setTimeout(r, 0));
     ok("stream/error 转发到聊天视图");
   }
 
+  console.log("== 10. todo/write → 进度面板 todos 消息 ==");
+  {
+    reset();
+    const { bridge, chat } = makeBridge();
+    bridge.handleServerRequest(sessionEvent({
+      type: "todo/write", seq: 8, time: 0,
+      data: { todos: [
+        { content: "设计产品需求文档", status: "completed" },
+        { content: "实现核心模块", status: "in_progress" },
+        { content: "编写并运行测试", status: "pending" },
+      ] },
+    }));
+    const todosMsg = chat.posted.find((m) => m.type === "todos");
+    assert.ok(todosMsg, "应推送 todos 消息");
+    assert.strictEqual(todosMsg.todos.length, 3);
+    assert.strictEqual(todosMsg.todos[1].status, "in_progress");
+    ok("todo/write → todos（进度面板数据源）");
+  }
+
+  console.log("== 11. tool/call → currentAction 当前动作 ==");
+  {
+    reset();
+    const { bridge, chat } = makeBridge();
+    bridge.handleServerRequest(sessionEvent({
+      type: "tool/call", seq: 9, time: 0,
+      data: { turn: 1, step: 2, callId: "c10", name: "edit", arguments: JSON.stringify({ file_path: "src/main.js" }) },
+    }, { for: "call", view: { card: "diff", title: "Edit src/main.js", diffs: [{ path: "src/main.js", oldText: "a", newText: "b" }], locations: [{ path: "src/main.js" }] } }));
+    const act = chat.posted.find((m) => m.type === "currentAction");
+    assert.ok(act, "应推送 currentAction");
+    assert.ok(act.tool.name.includes("Edit"));
+    assert.strictEqual(act.tool.path, "src/main.js");
+    ok("tool/call → currentAction（当前动作行）");
+  }
+
+  console.log("== 12. 打包预览：终端输出中的产物路径 → artifact 卡片 ==");
+  {
+    reset();
+    // 复用仓库里真实存在的 vsix 作为产物
+    const artifactRel = "dsh-vscode/dsh-vscode-0.2.1.vsix";
+    const artifactPath = path.join(WS, artifactRel);
+    const exists = require("node:fs").existsSync(artifactPath);
+    if (!exists) {
+      console.log("  (跳过：产物文件不存在)");
+    } else {
+      const { bridge, chat } = makeBridge();
+      bridge.handleServerRequest(sessionEvent({
+        type: "tool/result", seq: 10, time: 0,
+        data: { turn: 1, step: 2, callId: "c11", message: { role: "tool", content: [{ type: "text", text: "VSIX ready: " + artifactRel }] } },
+      }, { for: "result", view: { card: "terminal", title: "npm run package", output: "VSIX ready: " + artifactRel, exitCode: 0 } }));
+      await tick();
+      const art = chat.posted.find((m) => m.type === "artifact");
+      assert.ok(art, "应推送 artifact 卡片");
+      assert.ok(art.artifact.path.includes("dsh-vscode-0.2.1.vsix"));
+      ok("产物路径 → artifact 打包预览卡片: " + art.artifact.path);
+    }
+  }
+
   console.log(`\n全部通过: ${passed} 项`);
   process.exit(0);
 })().catch((e) => {

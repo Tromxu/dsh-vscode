@@ -7,6 +7,8 @@ A **native VS Code agent** that drives the [DeepSeek Harness](https://github.com
 ## Features
 
 - **Sidebar chat UI** (activity bar icon) streaming assistant text token-by-token (`assistant/chunk`)
+- **Progress panel** — always-visible status while the agent works: task list + progress bar (from `todo/write` events), the current action (latest tool call), and a **package preview** showing build artifacts (`.vsix`/`.exe`/`.zip`/…) with an *open* button
+- **Full-pipeline team command** (`DSH: 全流程开发（产品→发布）`) — one command runs a complete software delivery flow: *product design → development → testing → packaging/release*, with the agent maintaining a visible todo checklist through all phases
 - **Live editor integration**: file writes/edits from the agent are applied to the editor as `WorkspaceEdit`s (undoable, visible in Source Control) using the runtime's own diff payloads (`tool/result.meta.diffs`)
 - **Integrated terminal mirror**: commands the agent runs are shown in a read-only "DSH 命令" terminal (execution stays inside the dsh sandbox — safer)
 - **Native permission dialogs**: approval and question requests render as VS Code dialogs and answer back over the wire
@@ -47,7 +49,7 @@ Detailed protocol documentation (reverse-engineered from the MIT-licensed DSH so
 ```powershell
 npm install                 # fetches ws (or rely on the vendoring fallback)
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package.ps1
-code --install-extension dsh-vscode-0.2.1.vsix
+code --install-extension dsh-vscode-0.3.0.vsix
 ```
 
 ## Quick start
@@ -55,13 +57,15 @@ code --install-extension dsh-vscode-0.2.1.vsix
 1. Open your project folder in VS Code (the agent's file scope = this folder).
 2. Click the **DSH** icon in the activity bar. The panel auto-starts the runtime and shows `已连接 · http://127.0.0.1:<port>/`.
 3. First time: `Ctrl+Shift+P` → **`DSH: 配置 DeepSeek API Key`** and paste a key from [platform.deepseek.com](https://platform.deepseek.com) (stored in the DSH credential store).
-4. Send a task, e.g. *"fix the bug in src and run the tests until they pass"*.
+4. Send a task, e.g. *"fix the bug in src and run the tests until they pass"* — or run the full pipeline:
+   `Ctrl+Shift+P` → **`DSH: 全流程开发（产品→发布）`**, describe your software idea, and watch the four phases (design → dev → test → package) advance in the progress panel.
 
 ## Commands
 
 | Command | Description |
 |---|---|
 | `DSH: 打开智能体会话` | Open/activate the sidebar chat (also the activity bar icon) |
+| `DSH: 全流程开发（产品→发布）` | Run the full software delivery pipeline: product design → development → testing → packaging/release |
 | `DSH: 配置 DeepSeek API Key` | Store `DEEPSEEK_API_KEY` into the DSH credential store |
 | `DSH: 快速任务（无头模式）` | Run one headless task (`dsh --profile headless "…"`), output to the log panel |
 | `DSH: 停止运行时` | Stop the embedded runtime |

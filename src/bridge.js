@@ -14,6 +14,10 @@
  */
 const vscode = require("vscode");
 const path = require("node:path");
+const fs = require("node:fs");
+
+/** 产物文件扩展名（打包预览：vsix/exe/zip/...） */
+const ARTIFACT_RE = /[\w.\\/:-]+\.(vsix|exe|zip|msi|apk|aab|jar|dmg|pkg|deb|rpm|tar\.gz|dll|appx)/gi;
 
 /** 只读镜像终端：在 VS Code 集成终端里显示 dsh 已执行的命令与输出，不重新执行。 */
 class MirrorTerminal {
@@ -119,15 +123,27 @@ class NativeBridge {
         const t = this._callView(d, view);
         if (t.path) this._reveal(t.path);
         this.chatView.post({ type: "toolCall", tool: t });
+        this.chatView.post({ type: "currentAction", tool: { name: t.name, path: t.path, kind: t.kind } });
         break;
       }
       case "tool/result": {
         const r = this._resultView(d, view);
         if (r.diffs && r.diffs.length) this._applyDiffs(r.diffs);
         if (r.terminal) this._mirrorTerminal(r.terminal);
+        // 打包预览：扫描结果文本与终端输出中的产物路径
+        const hay = [
+          d.message && d.message.content ? JSON.stringify(d.message.content) : "",
+          r.terminal && r.terminal.output ? r.terminal.output : "",
+        ].join("\n");
+        for (const art of this._detectArtifacts(hay)) {
+          this.chatView.post({ type: "artifact", artifact: art });
+        }
         this.chatView.post({ type: "toolResult", tool: { state: "完成" } });
         break;
       }
+      case "todo/write":
+        this.chatView.post({ type: "todos", todos: (d && d.todos) || [] });
+        break;
       case "turn/end":
         this.chatView.post({ type: "status", state: "ok", label: "空闲" });
         break;
@@ -248,6 +264,24 @@ class NativeBridge {
     if (v.output) this._mirror.write(v.output);
     this._mirror.line("");
     this._mirror.line("└ exit " + (v.exitCode !== undefined ? v.exitCode : (v.signal || "?")) + "（执行于 dsh 沙箱）");
+  }
+
+  /** 打包预览：从文本中提取存在的构建产物路径（.vsix/.exe/...）。 */
+  _detectArtifacts(text) {
+    if (!text) return [];
+    const found = [];
+    const seen = new Set();
+    for (const m of String(text).matchAll(ARTIFACT_RE)) {
+      let p = m[0].trim().replace(/["')\],;:]+$/, "");
+      if (!p || seen.has(p)) continue;
+      let uri;
+      try { uri = this._resolveUri(p); } catch { continue; }
+      if (uri && fs.existsSync(uri.fsPath)) {
+        seen.add(p);
+        found.push({ path: p, label: path.basename(p) });
+      }
+    }
+    return found;
   }
 
   /** 审批：原生确认框 → respond。 */

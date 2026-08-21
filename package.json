@@ -2,7 +2,7 @@
   "name": "dsh-vscode",
   "displayName": "DeepSeek Harness (DSH) Agent",
   "description": "原生 VS Code 智能体：侧边栏聊天驱动 DSH 运行时，文件修改实时反映到编辑器，命令执行可见于集成终端，权限请求用原生对话框。",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "publisher": "local",
   "private": true,
   "license": "MIT",
@@ -17,6 +17,7 @@
     "onView:dsh.chatView",
     "onCommand:dsh.openChat",
     "onCommand:dsh.setApiKey",
+    "onCommand:dsh.fullPipeline",
     "onCommand:dsh.openPanel",
     "onCommand:dsh.quickTask",
     "onCommand:dsh.stop",
@@ -50,6 +51,11 @@
       {
         "command": "dsh.setApiKey",
         "title": "DSH: 配置 DeepSeek API Key",
+        "category": "DSH"
+      },
+      {
+        "command": "dsh.fullPipeline",
+        "title": "DSH: 全流程开发（产品→发布）",
         "category": "DSH"
       },
       {
