@@ -1,0 +1,123 @@
+{
+  "name": "dsh-vscode",
+  "displayName": "DeepSeek Harness (DSH) Agent",
+  "description": "原生 VS Code 智能体：侧边栏聊天驱动 DSH 运行时，文件修改实时反映到编辑器，命令执行可见于集成终端，权限请求用原生对话框。",
+  "version": "0.2.1",
+  "publisher": "local",
+  "private": true,
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./src/extension.js",
+  "activationEvents": [
+    "onView:dsh.chatView",
+    "onCommand:dsh.openChat",
+    "onCommand:dsh.setApiKey",
+    "onCommand:dsh.openPanel",
+    "onCommand:dsh.quickTask",
+    "onCommand:dsh.stop",
+    "onCommand:dsh.openLog"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "dsh",
+          "title": "DSH Agent",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "dsh": [
+        {
+          "id": "dsh.chatView",
+          "name": "会话",
+          "type": "webview"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "dsh.openChat",
+        "title": "DSH: 打开智能体会话",
+        "category": "DSH"
+      },
+      {
+        "command": "dsh.setApiKey",
+        "title": "DSH: 配置 DeepSeek API Key",
+        "category": "DSH"
+      },
+      {
+        "command": "dsh.openPanel",
+        "title": "DSH: 打开 Web 面板（旧版）",
+        "category": "DSH"
+      },
+      {
+        "command": "dsh.quickTask",
+        "title": "DSH: 快速任务（无头模式）",
+        "category": "DSH"
+      },
+      {
+        "command": "dsh.stop",
+        "title": "DSH: 停止运行时",
+        "category": "DSH"
+      },
+      {
+        "command": "dsh.openLog",
+        "title": "DSH: 查看运行日志",
+        "category": "DSH"
+      }
+    ],
+    "configuration": {
+      "title": "DSH Agent",
+      "properties": {
+        "dsh.harnessRoot": {
+          "type": "string",
+          "default": "",
+          "description": "DeepSeek Harness 安装目录。留空 = 自动探测（环境变量 DSH_HARNESS → 各平台标准安装位置）；找不到时请手动填写。"
+        },
+        "dsh.nodePath": {
+          "type": "string",
+          "default": "",
+          "description": "可选：捆绑 node.exe 的路径；留空时自动使用 harnessRoot\\resources\\node\\node.exe。"
+        },
+        "dsh.dshHome": {
+          "type": "string",
+          "default": "",
+          "description": "DSH_HOME 数据目录。留空 = 插件私有目录（推荐）；如需复用桌面版配置可填其 dsh-home 路径（使用前先关闭桌面版）。"
+        },
+        "dsh.port": {
+          "type": "number",
+          "default": 0,
+          "description": "Web 服务端口；0 = 自动分配空闲端口。"
+        },
+        "dsh.bootTimeoutSec": {
+          "type": "number",
+          "default": 120,
+          "description": "运行时启动超时（秒）。"
+        },
+        "dsh.autoOpen": {
+          "type": "boolean",
+          "default": false,
+          "description": "VS Code 启动后自动打开智能体会话视图。"
+        },
+        "dsh.approveCommands": {
+          "type": "boolean",
+          "default": true,
+          "description": "命令执行前是否弹原生确认框（关掉则自动放行命令，有风险）。"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "package:vsix": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package.ps1"
+  },
+  "dependencies": {
+    "ws": "^8.21.3"
+  }
+}

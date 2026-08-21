@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011" xmlns:d="http://schemas.microsoft.com/developer/vsx-schema-design/2011">
+  <Metadata>
+    <Identity Language="zh-CN" Id="dsh-vscode" Version="0.2.1" Publisher="local" />
+    <DisplayName>DeepSeek Harness (DSH) Agent Panel</DisplayName>
+    <Description>在 VS Code 中内嵌 DeepSeek Harness 智能体运行时：以当前打开的文件夹为工作区，完成写代码/检验/测试/修改的全流程开发。</Description>
+    <Tags>deepseek,agent,ai,coding,harness</Tags>
+    <GalleryFlags />
+  </Metadata>
+  <Installation>
+    <InstallationTarget Id="Microsoft.VisualStudio.Code" />
+  </Installation>
+  <Dependencies />
+  <Assets>
+    <Asset Type="Microsoft.VisualStudio.Code.Manifest" Path="extension/package.json" />
+  </Assets>
+</PackageManifest>

@@ -1,0 +1,7 @@
+.smoke/**
+.vsix-stage/**
+scripts/**
+packaging/**
+*.vsix
+.gitignore
+.vscodeignore
