@@ -9,6 +9,7 @@ A **native VS Code agent** that drives the [DeepSeek Harness](https://github.com
 - **Sidebar chat UI** (activity bar icon) streaming assistant text token-by-token (`assistant/chunk`)
 - **Progress panel** — always-visible status while the agent works: task list + progress bar (from `todo/write` events), the current action (latest tool call), and a **package preview** showing build artifacts (`.vsix`/`.exe`/`.zip`/…) with an *open* button
 - **Project folder control** (`DSH: 设置工程位置…` / `DSH: 打开工程位置`) — choose and jump to the project storage folder the agent works in (shown in the sidebar header)
+- **Session history** (`DSH: 打开历史工程/会话…`) — reopen past projects and continue the conversation: sessions persist across VS Code restarts, history is replayed into the chat, and reopening a session can switch the project folder back to its original location
 - **Full-pipeline team command** (`DSH: 全流程开发（产品→发布）`) — one command runs a complete software delivery flow: *product design → development → testing → packaging/release*, with the agent maintaining a visible todo checklist through all phases
 - **Live editor integration**: file writes/edits from the agent are applied to the editor as `WorkspaceEdit`s (undoable, visible in Source Control) using the runtime's own diff payloads (`tool/result.meta.diffs`)
 - **Integrated terminal mirror**: commands the agent runs are shown in a read-only "DSH 命令" terminal (execution stays inside the dsh sandbox — safer)
@@ -69,6 +70,7 @@ code --install-extension dsh-vscode-0.3.0.vsix
 | `DSH: 全流程开发（产品→发布）` | Run the full software delivery pipeline: product design → development → testing → packaging/release |
 | `DSH: 设置工程位置…` | Pick the project storage folder (agent workspace); saved globally, runtime restarts to take effect |
 | `DSH: 打开工程位置` | Reveal the project folder in the Explorer (or open it in the OS) |
+| `DSH: 打开历史工程/会话…` | List persisted sessions; reopen one to continue (optionally switch the project folder back to it) |
 | `DSH: 配置 DeepSeek API Key` | Store `DEEPSEEK_API_KEY` into the DSH credential store |
 | `DSH: 快速任务（无头模式）` | Run one headless task (`dsh --profile headless "…"`), output to the log panel |
 | `DSH: 停止运行时` | Stop the embedded runtime |

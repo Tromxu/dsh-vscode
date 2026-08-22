@@ -24,6 +24,7 @@ const { createPanel } = require("./webview");
 const { ChatViewProvider } = require("./chat-webview");
 const { SessionClient } = require("./session-client");
 const { NativeBridge } = require("./bridge");
+const { foldHistory } = require("./history");
 
 let runtime = null;
 let panel = null;
@@ -194,9 +195,110 @@ async function onViewOpen(context) {
   try {
     const rt = await ensureSession(context);
     postStatus("ok", "已连接 · " + rt.url);
+    // 打开面板时恢复该工程上次的会话与聊天记录
+    const key = sessionKey();
+    const saved = context.globalState.get(key);
+    if (saved) {
+      try {
+        currentSessionId = saved;
+        await renderHistory(context);
+      } catch (e) {
+        output.appendLine("[restore] " + e.message);
+        currentSessionId = null;
+      }
+    }
   } catch (e) {
     postStatus("bad", "连接失败");
     output.appendLine("[view-open] " + e.message);
+  }
+}
+
+/** 会话持久化键：按工程位置区分。 */
+function sessionKey() {
+  return "dsh.session." + getWorkspace();
+}
+
+/** 确保存在当前会话：优先恢复本工程上次的会话，否则新建并持久化。 */
+async function ensureSessionId(context) {
+  if (currentSessionId) return currentSessionId;
+  const key = sessionKey();
+  const saved = context.globalState.get(key);
+  if (saved) {
+    try {
+      await sessionClient.sessionHistory({ sessionId: saved, maxMessages: 1 });
+      currentSessionId = saved;
+      output.appendLine("[session] 恢复历史会话: " + saved);
+      return saved;
+    } catch (e) {
+      output.appendLine("[session] 历史会话不可用，将新建: " + e.message);
+    }
+  }
+  const created = await sessionClient.sessionCreate({});
+  currentSessionId = created.sessionId;
+  await context.globalState.update(key, currentSessionId);
+  output.appendLine("[session] created: " + currentSessionId);
+  return currentSessionId;
+}
+
+/** 把当前会话的历史消息渲染到聊天视图。 */
+async function renderHistory(context) {
+  if (!currentSessionId || !sessionClient) return;
+  const hist = await sessionClient.sessionHistory({ sessionId: currentSessionId, maxMessages: 100 });
+  const msgs = foldHistory(hist.events.map((h) => h.event));
+  if (chatProvider) {
+    chatProvider.post({ type: "history", messages: msgs });
+    chatProvider.post({ type: "workspace", path: getWorkspace() });
+  }
+  postStatus("ok", "已恢复历史会话 · " + (runtime ? runtime.url : ""));
+  output.appendLine("[history] 已渲染 " + msgs.length + " 条历史消息");
+}
+
+/** 打开历史工程/会话：列出持久化会话，恢复选择项并可切换工程位置。 */
+async function openHistory(context) {
+  try {
+    await ensureSession(context);
+    const list = await sessionClient.sessionList();
+    const items = list.items || [];
+    if (!items.length) {
+      vscode.window.showInformationMessage("暂无历史会话（首次使用后会自动记录）。");
+      return;
+    }
+    const picks = items.map((i) => ({
+      label: (i.projections && i.projections.values && i.projections.values.title) || "(未命名会话)",
+      description: i.cwd || "（无工程记录）",
+      detail: "更新于 " + new Date(i.updatedAt).toLocaleString() + (i.blank ? " · 未开始" : ""),
+      sessionId: i.sessionId,
+      cwd: i.cwd || "",
+    }));
+    const pick = await vscode.window.showQuickPick(picks, {
+      placeHolder: "选择历史工程/会话（回车恢复并继续对话）",
+      matchOnDescription: true,
+      ignoreFocusOut: true,
+    });
+    if (!pick) return;
+    const ws = getWorkspace();
+    if (pick.cwd && path.resolve(pick.cwd) !== path.resolve(ws)) {
+      const go = await vscode.window.showInformationMessage(
+        "该历史会话的工程位于：" + pick.cwd + "\n是否将工程位置切换到这里，便于继续修复该工程的 bug？",
+        { modal: true },
+        "切换并打开",
+        "仅恢复会话"
+      );
+      if (go === "切换并打开") {
+        await vscode.workspace
+          .getConfiguration("dsh")
+          .update("workspaceRoot", pick.cwd, vscode.ConfigurationTarget.Global);
+        currentSessionId = null;
+        await stopRuntime();
+        await ensureSession(context);
+      }
+    }
+    currentSessionId = pick.sessionId;
+    await context.globalState.update(sessionKey(), pick.sessionId);
+    await renderHistory(context);
+    vscode.window.showInformationMessage("已恢复历史会话，可直接继续对话（例如：修复这个工程的 bug）。");
+  } catch (e) {
+    vscode.window.showErrorMessage("打开历史会话失败: " + e.message);
   }
 }
 
@@ -205,11 +307,7 @@ async function onUserSend(text) {
   try {
     await ensureSession(chatProvider._context);
     postStatus("ok", "已连接 · " + (runtime ? runtime.url : ""));
-    if (!currentSessionId) {
-      const created = await sessionClient.sessionCreate({});
-      currentSessionId = created.sessionId;
-      output.appendLine("[session] created: " + currentSessionId);
-    }
+    await ensureSessionId(chatProvider._context);
     await sessionClient.sessionPrompt({
       sessionId: currentSessionId,
       mode: "queue",
@@ -267,11 +365,7 @@ async function fullPipeline(context) {
   try {
     await ensureSession(context);
     postStatus("ok", "已连接 · " + (runtime ? runtime.url : ""));
-    if (!currentSessionId) {
-      const created = await sessionClient.sessionCreate({});
-      currentSessionId = created.sessionId;
-      output.appendLine("[session] created: " + currentSessionId);
-    }
+    await ensureSessionId(context);
     await sessionClient.sessionPrompt({
       sessionId: currentSessionId,
       mode: "queue",
@@ -338,6 +432,7 @@ function activate(context) {
     vscode.commands.registerCommand("dsh.fullPipeline", () => fullPipeline(context)),
     vscode.commands.registerCommand("dsh.setWorkspace", () => setWorkspace(context)),
     vscode.commands.registerCommand("dsh.openWorkspace", () => openWorkspace()),
+    vscode.commands.registerCommand("dsh.openHistory", () => openHistory(context)),
     vscode.commands.registerCommand("dsh.openPanel", () => openPanel(context)),
     vscode.commands.registerCommand("dsh.quickTask", () => quickTask(context)),
     vscode.commands.registerCommand("dsh.stop", () => stopRuntime()),

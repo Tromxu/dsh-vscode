@@ -245,6 +245,16 @@ function html() {
       case "init": setStatus(m.state || "", m.model || ""); break;
       case "status": setStatus(m.state, m.label || m.model); break;
       case "workspace": workspaceEl.textContent = m.path || ""; workspaceEl.title = "工程位置：" + (m.path || "") + "（点击打开）"; break;
+      case "history": {
+        // 恢复历史会话：清空当前消息区并重放
+        messages.querySelectorAll(".msg, .card").forEach((el) => el.remove());
+        $("empty") && $("empty").remove();
+        (m.messages || []).forEach((msg) => {
+          if (msg.role === "user") addUser(msg.text);
+          else addAssistant(msg.text, false);
+        });
+        break;
+      }
       case "assistantDelta": addAssistant(m.text, true); break;
       case "assistantDone": setBusy(false); setStatus("ok", m.model || model.textContent); break;
       case "toolCall": addToolCard(m.tool); break;
