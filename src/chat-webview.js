@@ -29,6 +29,10 @@ header .title { font-weight:600; font-size:12px; }
 #model { color:var(--muted); font-size:11px; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 #workspace { color:var(--muted); font-size:11px; max-width:40%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; cursor:pointer; flex:none; }
 #workspace:hover { color:var(--fg); }
+/* ---- 快捷操作条（免 Ctrl+Shift+P） ---- */
+#tools { flex:none; display:flex; flex-wrap:wrap; gap:4px; padding:6px 10px; border-bottom:1px solid var(--border); background:var(--card); }
+#tools button { flex:1; min-width:64px; padding:3px 6px; font-size:11px; background:transparent; border:1px solid var(--border); color:var(--fg); border-radius:4px; cursor:pointer; white-space:nowrap; }
+#tools button:hover { border-color:var(--accent); color:var(--accent-fg); background:var(--accent); }
 button { background:var(--accent); color:var(--accent-fg); border:0; border-radius:4px; padding:4px 10px; cursor:pointer; font-size:12px; }
 button.ghost { background:transparent; border:1px solid var(--border); color:var(--fg); }
 button:disabled { opacity:.5; cursor:default; }
@@ -98,6 +102,13 @@ function html() {
     <span id="workspace" title="工程位置（点击打开）"></span>
     <button id="stopBtn" class="ghost" disabled title="停止当前回合">停止</button>
   </header>
+  <div id="tools">
+    <button data-cmd="dsh.setWorkspace" title="设置工程位置（智能体工作目录）">📂 工程</button>
+    <button data-cmd="dsh.openHistory" title="打开历史工程/会话">🕘 历史</button>
+    <button data-cmd="dsh.fullPipeline" title="全流程开发：设计→开发→测试→发布">🚀 全流程</button>
+    <button data-cmd="dsh.setApiKey" title="配置 DeepSeek API Key">🔑 密钥</button>
+    <button data-cmd="dsh.quickTask" title="快速任务（无头模式）">⚡ 任务</button>
+  </div>
   <div id="progress" class="hidden">
     <div class="p-row">
       <span class="p-label">进度</span>
@@ -125,6 +136,10 @@ function html() {
   const artifactSeen = new Set();
 
   workspaceEl.onclick = () => vscode.postMessage({ type: "openWorkspace" });
+  // 快捷操作条：点击 → 宿主执行对应命令（免命令面板）
+  document.querySelectorAll("#tools button").forEach((btn) => {
+    btn.onclick = () => vscode.postMessage({ type: "command", command: btn.dataset.cmd });
+  });
 
   function setStatus(state, label) {
     statusDot.className = state; // ok | bad | ''

@@ -416,6 +416,14 @@ function activate(context) {
       case "openWorkspace":
         await openWorkspace();
         break;
+      case "command":
+        // 快捷操作条按钮：触发扩展自身命令（免命令面板）
+        try {
+          await vscode.commands.executeCommand(m.command);
+        } catch (e) {
+          output.appendLine("[command] " + m.command + " -> " + e.message);
+        }
+        break;
     }
   };
   context.subscriptions.push(

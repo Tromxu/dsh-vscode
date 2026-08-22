@@ -2,7 +2,7 @@
   "name": "dsh-vscode",
   "displayName": "DeepSeek Harness (DSH) Agent",
   "description": "原生 VS Code 智能体：侧边栏聊天驱动 DSH 运行时，文件修改实时反映到编辑器，命令执行可见于集成终端，权限请求用原生对话框。",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "publisher": "local",
   "private": true,
   "license": "MIT",
@@ -141,7 +141,39 @@
           "description": "命令执行前是否弹原生确认框（关掉则自动放行命令，有风险）。"
         }
       }
-    }
+    },
+    "keybindings": [
+      {
+        "command": "dsh.openHistory",
+        "key": "ctrl+alt+h",
+        "mac": "cmd+alt+h",
+        "title": "DSH: 打开历史工程/会话…"
+      },
+      {
+        "command": "dsh.fullPipeline",
+        "key": "ctrl+alt+f",
+        "mac": "cmd+alt+f",
+        "title": "DSH: 全流程开发（产品→发布）"
+      },
+      {
+        "command": "dsh.setWorkspace",
+        "key": "ctrl+alt+w",
+        "mac": "cmd+alt+w",
+        "title": "DSH: 设置工程位置…"
+      },
+      {
+        "command": "dsh.setApiKey",
+        "key": "ctrl+alt+k",
+        "mac": "cmd+alt+k",
+        "title": "DSH: 配置 DeepSeek API Key"
+      },
+      {
+        "command": "dsh.stop",
+        "key": "ctrl+alt+x",
+        "mac": "cmd+alt+x",
+        "title": "DSH: 停止运行时"
+      }
+    ]
   },
   "scripts": {
     "package:vsix": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package.ps1"
