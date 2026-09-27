@@ -88,15 +88,23 @@ function getFreePort() {
   });
 }
 
-/** 轮询 URL 直到返回 <500。 */
+/**
+ * 轮询 URL 直到**真正就绪**：HTTP <500 且正文包含 DSH boot 清单（__DSH_BOOT__）。
+ * 注意：宿主 HTTP 服务可能先绑定端口、短暂返回非 boot 页面，因此必须继续轮询而不是立刻判失败。
+ */
 async function waitForServer(url, timeoutMs, onTick) {
   const deadline = Date.now() + timeoutMs;
   let lastErr = null;
   while (Date.now() < deadline) {
     try {
       const res = await fetch(url, { signal: AbortSignal.timeout(3000) });
-      if (res.status < 500) return res;
-      lastErr = new Error("HTTP " + res.status);
+      if (res.status < 500) {
+        const text = await res.text();
+        if (text.includes("__DSH_BOOT__")) return res;
+        lastErr = new Error("服务已响应但尚未就绪（暂无 boot 清单）");
+      } else {
+        lastErr = new Error("HTTP " + res.status);
+      }
     } catch (e) {
       lastErr = e;
     }
@@ -115,6 +123,8 @@ class RuntimeProcess {
     this.child = null;
     this.port = 0;
     this.url = "";
+    this.token = null;   // 新版 dsh 的启动令牌（用于换取会话 Cookie）
+    this.cookie = null;  // 认证 Cookie（HTTP 与 WebSocket 都要带）
     this.log = "";
     this._logListeners = [];
   }
@@ -124,18 +134,51 @@ class RuntimeProcess {
   }
 
   _emitLog(line) {
-    this.log += line + "\n";
+    // 令牌不写入日志（避免泄露）
+    const redacted = String(line).replace(/([?&]token=)[\w-]+/g, "$1***");
+    this.log += redacted + "\n";
     if (this.log.length > 200000) this.log = this.log.slice(-100000);
-    for (const fn of this._logListeners) fn(line);
+    for (const fn of this._logListeners) fn(redacted);
   }
 
   get running() {
     return !!(this.child && this.child.exitCode === null);
   }
 
+  /** 带令牌的 UI 地址（浏览器/内嵌面板用；访问后会 303 下发 Cookie）。 */
+  get uiUrl() {
+    return this.token ? this.url + "?token=" + this.token : this.url;
+  }
+
+  /**
+   * 新版 dsh 认证：GET /?token=<launchToken> → 303 + set-cookie → 之后带 Cookie 访问。
+   * 老版本无令牌时直接跳过。
+   */
+  async authenticate() {
+    if (!this.token) return;
+    const res = await fetch(this.url + "?token=" + this.token, {
+      redirect: "manual",
+      headers: { accept: "text/html" },
+    });
+    const setCookies =
+      typeof res.headers.getSetCookie === "function"
+        ? res.headers.getSetCookie()
+        : [res.headers.get("set-cookie")].filter(Boolean);
+    if (setCookies.length > 0) {
+      this.cookie = setCookies.map((c) => String(c).split(";")[0]).join("; ");
+      this._emitLog("认证成功（已获取会话 Cookie）");
+    } else {
+      this._emitLog("认证响应无 Set-Cookie（status=" + res.status + "）");
+    }
+  }
+
   start(resolved, port) {
     if (this.running) return;
     fs.mkdirSync(resolved.dshHome, { recursive: true });
+    // 工作目录缺失时创建，避免 spawn ENOENT 硬失败
+    try {
+      fs.mkdirSync(resolved.workspace, { recursive: true });
+    } catch { /* 权限不足时交给 spawn 报错 */ }
     const env = {
       ...process.env,
       DSH_HOME: resolved.dshHome,
@@ -146,14 +189,16 @@ class RuntimeProcess {
 
     this.port = port;
     this.url = "http://127.0.0.1:" + port + "/";
+    this.token = null;
+    this.cookie = null;
     this._emitLog("启动命令: " + resolved.node + " --expose-internals " + resolved.bin +
-      " --profile web --port " + port);
+      " --profile web --port " + port + " --no-open");
     this._emitLog("DSH_HOME : " + resolved.dshHome);
     this._emitLog("工作区   : " + resolved.workspace);
 
     const child = spawn(
       resolved.node,
-      ["--expose-internals", resolved.bin, "--profile", "web", "--port", String(port)],
+      ["--expose-internals", resolved.bin, "--profile", "web", "--port", String(port), "--no-open"],
       {
         env,
         cwd: resolved.workspace,
@@ -162,7 +207,16 @@ class RuntimeProcess {
       }
     );
     this.child = child;
-    child.stdout.on("data", (d) => this._emitLog(String(d).trimEnd()));
+    child.stdout.on("data", (d) => {
+      const s = String(d);
+      // 捕获新版启动令牌（形如 http://127.0.0.1:PORT/?token=XXXX）
+      const m = /[?&]token=([\w-]+)/.exec(s);
+      if (m && !this.token) {
+        this.token = m[1];
+        this._emitLog("[auth] 已捕获启动令牌，将用于换取会话 Cookie");
+      }
+      this._emitLog(s.trimEnd());
+    });
     child.stderr.on("data", (d) => this._emitLog("[err] " + String(d).trimEnd()));
     child.on("error", (e) => this._emitLog("[spawn error] " + e.message));
     child.on("exit", (code, sig) => {
@@ -170,13 +224,46 @@ class RuntimeProcess {
     });
   }
 
-  /** 等待 HTTP 就绪且返回 DSH boot 清单。 */
+  /**
+   * 等待就绪（兼容有无令牌两种 dsh 版本）：
+   *   - 老版本：GET / 直接返回 boot 清单
+   *   - 新版本：GET / 返回 401 → 用捕获到的启动令牌换取 Cookie → 带 Cookie 再校验 boot 清单
+   */
   async waitReady(timeoutMs, onTick) {
-    const res = await waitForServer(this.url, timeoutMs, onTick);
-    const text = await res.text();
-    if (!text.includes("__DSH_BOOT__")) {
-      throw new Error("服务已响应，但缺少 DSH boot 清单（页面异常）。");
+    const deadline = Date.now() + timeoutMs;
+    let lastErr = null;
+    let lastAuthAt = 0;
+    while (Date.now() < deadline) {
+      try {
+        const res = await fetch(this.url, {
+          headers: this.cookie ? { cookie: this.cookie } : {},
+          signal: AbortSignal.timeout(3000),
+        });
+        if (res.status === 401) {
+          if (this.token && Date.now() - lastAuthAt > 5000) {
+            lastAuthAt = Date.now();
+            await this.authenticate();
+            lastErr = new Error(this.cookie ? "已认证，等待应用就绪" : "等待启动令牌/认证");
+          } else {
+            lastErr = new Error("等待启动令牌/认证");
+          }
+        } else if (res.status < 500) {
+          const text = await res.text();
+          if (text.includes("__DSH_BOOT__")) return;
+          lastErr = new Error("服务已响应但尚未就绪（暂无 boot 清单）");
+        } else {
+          lastErr = new Error("HTTP " + res.status);
+        }
+      } catch (e) {
+        lastErr = e;
+      }
+      if (onTick) onTick(lastErr ? lastErr.message : "无响应");
+      await new Promise((r) => setTimeout(r, 500));
     }
+    throw new Error(
+      "DSH 服务在 " + Math.round(timeoutMs / 1000) + "s 内未就绪：" +
+      (lastErr ? lastErr.message : "无响应")
+    );
   }
 
   /** 优雅停止：SIGTERM → 5s 宽限 → taskkill 整棵进程树。 */

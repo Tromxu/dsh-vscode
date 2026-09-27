@@ -88,6 +88,12 @@ class NativeBridge {
     }
   }
 
+  /** 新版 follow 流：直接投递裸会话事件（无 frame 包装）。 */
+  handleEvent(sessionId, event) {
+    if (!event || typeof event !== "object") return;
+    this.handleSessionEvent({ sessionId, event });
+  }
+
   handleSessionEvent(frame) {
     const { event, view } = frame;
     const d = event.data;

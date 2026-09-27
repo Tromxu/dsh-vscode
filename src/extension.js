@@ -33,6 +33,8 @@ let chatProvider = null;
 let sessionClient = null;
 let bridge = null;
 let currentSessionId = null;
+let follow = null;
+let followSessionId = null;
 
 /**
  * 工程位置（智能体工作区）：
@@ -46,7 +48,7 @@ function getWorkspace() {
   return folders && folders.length > 0 ? folders[0].uri.fsPath : os.homedir();
 }
 
-/** 设置工程位置（保存为全局设置并重启运行时，下次会话在新目录工作）。 */
+/** 设置工程位置（保存为全局设置；下次消息将在新目录新建会话，无需重启）。 */
 async function setWorkspace(context) {
   const picked = await vscode.window.showOpenDialog({
     canSelectFolders: true,
@@ -60,11 +62,11 @@ async function setWorkspace(context) {
   await vscode.workspace
     .getConfiguration("dsh")
     .update("workspaceRoot", dir, vscode.ConfigurationTarget.Global);
-  // 工作区变了：重启运行时并新建会话，确保下次会话以新目录为 cwd
+  // 会话级 cwd：无需重启运行时，下次发送消息会在新目录新建会话
+  stopFollow();
   currentSessionId = null;
-  await stopRuntime();
   vscode.window.showInformationMessage(
-    "工程位置已设置为：" + dir + "\n运行时已重启，发送消息后将在该目录工作。"
+    "工程位置已切换为：" + dir + "\n无需重启，发送消息后智能体将在该目录工作。"
   );
   if (chatProvider) chatProvider.post({ type: "workspace", path: dir });
 }
@@ -151,6 +153,7 @@ async function stopRuntime() {
   if (!runtime) return;
   const rt = runtime;
   runtime = null;
+  stopFollow();
   if (sessionClient) {
     sessionClient.dispose();
     sessionClient = null;
@@ -169,10 +172,42 @@ async function ensureSession(context) {
     bridge = new NativeBridge(context, sessionClient, chatProvider, output);
     sessionClient.onServerRequest((msg) => bridge.handleServerRequest(msg));
     await sessionClient.connect();
-    output.appendLine("[session] 已连接事件流");
+    output.appendLine("[session] 已连接（协议模式：" + sessionClient.mode + "）");
     postStatus("ok", "已连接 · " + rt.url);
   }
   return rt;
+}
+
+/** 新版：跟随会话（快照即历史，随后实时事件进桥接）。 */
+function startFollow(context, sessionId) {
+  if (!sessionClient || sessionClient.mode !== "new") return;
+  if (follow && followSessionId === sessionId) return;
+  stopFollow();
+  followSessionId = sessionId;
+  follow = sessionClient.followSession(sessionId, {
+    onSnapshot: (snap) => {
+      const records = (snap.records || []).filter((r) => r && r.type === "event").map((r) => r.event);
+      const msgs = foldHistory(records);
+      if (chatProvider) {
+        chatProvider.post({ type: "history", messages: msgs });
+        chatProvider.post({ type: "workspace", path: getWorkspace() });
+      }
+      output.appendLine("[follow] 快照 " + msgs.length + " 条消息（cursor=" + snap.cursor + "，cwd=" + ((snap.header && snap.header.cwd) || "?") + "）");
+    },
+    onEvent: (ev) => {
+      if (bridge) bridge.handleEvent(sessionId, ev);
+    },
+    onError: (err) => output.appendLine("[follow] 流错误: " + JSON.stringify(err)),
+  });
+  output.appendLine("[follow] 已跟随会话 " + sessionId);
+}
+
+function stopFollow() {
+  if (follow) {
+    try { follow.close(); } catch { /* ignore */ }
+    follow = null;
+  }
+  followSessionId = null;
 }
 
 function postStatus(state, label) {
@@ -218,14 +253,22 @@ function sessionKey() {
   return "dsh.session." + getWorkspace();
 }
 
-/** 确保存在当前会话：优先恢复本工程上次的会话，否则新建并持久化。 */
+/** 确保存在当前会话：优先恢复本工程上次的会话，否则新建并持久化；随后开始跟随。 */
 async function ensureSessionId(context) {
-  if (currentSessionId) return currentSessionId;
+  if (currentSessionId) {
+    startFollow(context, currentSessionId);
+    return currentSessionId;
+  }
   const key = sessionKey();
   const saved = context.globalState.get(key);
   if (saved) {
     try {
-      await sessionClient.sessionHistory({ sessionId: saved, maxMessages: 1 });
+      if (sessionClient.mode === "new") {
+        // 新版：跟随成功即证明会话可用（快照会带回历史）
+        startFollow(context, saved);
+      } else {
+        await sessionClient.sessionHistory({ sessionId: saved, maxMessages: 1 });
+      }
       currentSessionId = saved;
       output.appendLine("[session] 恢复历史会话: " + saved);
       return saved;
@@ -233,16 +276,22 @@ async function ensureSessionId(context) {
       output.appendLine("[session] 历史会话不可用，将新建: " + e.message);
     }
   }
-  const created = await sessionClient.sessionCreate({});
+  const created = await sessionClient.sessionCreate({ cwd: getWorkspace() });
   currentSessionId = created.sessionId;
   await context.globalState.update(key, currentSessionId);
   output.appendLine("[session] created: " + currentSessionId);
+  startFollow(context, currentSessionId);
   return currentSessionId;
 }
 
-/** 把当前会话的历史消息渲染到聊天视图。 */
+/** 把当前会话的历史消息渲染到聊天视图（新版由 follow 快照完成）。 */
 async function renderHistory(context) {
   if (!currentSessionId || !sessionClient) return;
+  if (sessionClient.mode === "new") {
+    startFollow(context, currentSessionId);
+    postStatus("ok", "已恢复历史会话 · " + (runtime ? runtime.url : ""));
+    return;
+  }
   const hist = await sessionClient.sessionHistory({ sessionId: currentSessionId, maxMessages: 100 });
   const msgs = foldHistory(hist.events.map((h) => h.event));
   if (chatProvider) {
@@ -288,11 +337,9 @@ async function openHistory(context) {
         await vscode.workspace
           .getConfiguration("dsh")
           .update("workspaceRoot", pick.cwd, vscode.ConfigurationTarget.Global);
-        currentSessionId = null;
-        await stopRuntime();
-        await ensureSession(context);
       }
     }
+    stopFollow();
     currentSessionId = pick.sessionId;
     await context.globalState.update(sessionKey(), pick.sessionId);
     await renderHistory(context);
